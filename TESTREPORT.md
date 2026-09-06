@@ -1,11 +1,9 @@
 VERDICT: BUGS_FOUND
 
-**Bug 1**
-
-- **Title:** Routing zu `/flags/{key}` liefert 404 für gültige Schlüssel – Kernrouten nicht verdrahtet
-- **Symptom:** Die zentralen Feature-Flag-Endpunkte `GET /flags/{key}`, `PUT /flags/{key}`, `DELETE /flags/{key}` und `GET /flags/{key}/evaluate` sind für einen gültigen Schlüssel wie `my-flag` nicht erreichbar. Sie antworten mit `404` statt der erwarteten Erfolgsantworten. Dadurch sind mehrere Acceptance-Kriterien (AC-05, AC-06, AC-07, AC-08/AC-11) zur Laufzeit nicht erfüllbar.
-- **Repro:** `go test ./...` ausführen – der Test `TestRoutesAreWired` im Paket `featureflags/internal/router` schlägt fehl.
-- **Evidence:**
+- **Titel**: Routen für `/flags/{key}` nicht verdrahtet – GET/PUT/DELETE/Evaluate liefern 404
+- **Symptom**: Aus Nutzersicht sind alle Einzel-Flag-Endpunkte nicht erreichbar: `GET /flags/<key>`, `PUT /flags/<key>`, `DELETE /flags/<key>` und `GET /flags/<key>/evaluate` antworten mit 404. Damit können angelegte Flags nicht abgerufen, aktualisiert, gelöscht oder evaluiert werden – Kernfunktionalität der Spezifikation ist gebrochen.
+- **Repro**: `go test ./...` ausführen, bzw. direkt `GET /flags/my-flag`, `PUT /flags/my-flag`, `DELETE /flags/my-flag`, `GET /flags/my-flag/evaluate` gegen den Server absetzen.
+- **Beleg**:
   ```
   --- FAIL: TestRoutesAreWired (0.00s)
       --- FAIL: TestRoutesAreWired/get_flag (0.00s)
@@ -16,6 +14,8 @@ VERDICT: BUGS_FOUND
           routes_test.go:43: DELETE /flags/my-flag is not wired: got 404
       --- FAIL: TestRoutesAreWired/evaluate_flag (0.00s)
           routes_test.go:43: GET /flags/my-flag/evaluate is not wired: got 404
+  FAIL
+  FAIL	featureflags/internal/router	0.342s
   ```
-- **Suspected file(s):** Gemeinsame Ursache in der Routenregistrierung bzw. im Routing-Handler – primär `internal/router/router.go` im Zusammenspiel mit `internal/handlers/service.go`. Die vier fehlgeschlagenen Untertests teilen dieselbe Fehlerform (alle Routen unter `/flags/{key}` liefern 404), daher liegt der Fehler vermutlich zentral in der Verdrahtung der Muster/Handler und nicht in den einzelnen Handler-Dateien.
-- **Severity:** high
+- **Verdächtige Datei(en)**: `internal/router/router.go` – alle vier fehlschlagenden Routen teilen dieselbe `{key}`-Musterform und werden gemeinsam in `router.New` registriert. Die identische Fehlerform spricht für eine gemeinsame Ursache in der Verdrahtung der Wildcard-Muster, nicht in den einzelnen Handlern.
+- **Schweregrad**: high
