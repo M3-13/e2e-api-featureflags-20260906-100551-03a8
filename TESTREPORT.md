@@ -1,9 +1,11 @@
 VERDICT: BUGS_FOUND
 
-- **Titel**: Routen für `/flags/{key}` nicht verdrahtet – GET/PUT/DELETE/Evaluate liefern 404
-- **Symptom**: Aus Nutzersicht sind alle Einzel-Flag-Endpunkte nicht erreichbar: `GET /flags/<key>`, `PUT /flags/<key>`, `DELETE /flags/<key>` und `GET /flags/<key>/evaluate` antworten mit 404. Damit können angelegte Flags nicht abgerufen, aktualisiert, gelöscht oder evaluiert werden – Kernfunktionalität der Spezifikation ist gebrochen.
-- **Repro**: `go test ./...` ausführen, bzw. direkt `GET /flags/my-flag`, `PUT /flags/my-flag`, `DELETE /flags/my-flag`, `GET /flags/my-flag/evaluate` gegen den Server absetzen.
-- **Beleg**:
+**Bug 1: Router verdrahtet Pfadparameter-Routen nicht (GET/PUT/DELETE /flags/{key} und Evaluierung liefern 404)**
+
+- **Titel**: Router verdrahtet Pfadparameter-Routen nicht
+- **Symptom**: Die Kern-API des Feature-Flag-Service ist teilweise nicht erreichbar: Einzelabruf, Update, Delete und Evaluierung eines Flags über die Pfade mit `{key}` antworten mit HTTP 404 statt der erwarteten Statuscodes (200/204). Dadurch sind AC-05, AC-06, AC-07, AC-08 und AC-11 nicht erfüllt – Flags können zwar angelegt und gelistet werden, aber nicht gezielt gelesen, geändert, gelöscht oder ausgewertet.
+- **Repro**: `go test ./...` im Projektverzeichnis ausführen. Der Test `TestRoutesAreWired` im Paket `featureflags/internal/router` schlägt fehl.
+- **Evidence**:
   ```
   --- FAIL: TestRoutesAreWired (0.00s)
       --- FAIL: TestRoutesAreWired/get_flag (0.00s)
@@ -14,8 +16,6 @@ VERDICT: BUGS_FOUND
           routes_test.go:43: DELETE /flags/my-flag is not wired: got 404
       --- FAIL: TestRoutesAreWired/evaluate_flag (0.00s)
           routes_test.go:43: GET /flags/my-flag/evaluate is not wired: got 404
-  FAIL
-  FAIL	featureflags/internal/router	0.342s
   ```
-- **Verdächtige Datei(en)**: `internal/router/router.go` – alle vier fehlschlagenden Routen teilen dieselbe `{key}`-Musterform und werden gemeinsam in `router.New` registriert. Die identische Fehlerform spricht für eine gemeinsame Ursache in der Verdrahtung der Wildcard-Muster, nicht in den einzelnen Handlern.
-- **Schweregrad**: high
+- **Suspected file(s)**: `internal/router/router.go` – alle vier fehlgeschlagenen Routen teilen sich denselben Mechanismus (Muster mit `{key}`). Da die Basis-Routen (`GET /flags`, `POST /flags`, `GET /healthz`) offenbar funktionieren, liegt der Fehler vermutlich in der Registrierung oder dem Matching der Pfadparameter-Muster, nicht in den einzelnen Handlern.
+- **Severity**: high (Kernfunktionalität des Feature-Flag-Service ist blockiert; ohne diese Endpunkte ist der Service praktisch unbrauchbar).
