@@ -13,7 +13,10 @@
       "port_env": "PORT",
       "health": { "path": "/healthz", "expect_status": [200] },
       "env": {
-        "PORT": { "dev": "8080" }
+        "PORT": { "dev": "8080" },
+        "HOST": { "dev": "127.0.0.1" },
+        "FEATUREFLAGS_API_KEY": { "external": true,
+          "degraded_without": "all /flags routes answer 503 service locked" }
       }
     }
   ]

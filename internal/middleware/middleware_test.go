@@ -89,3 +89,108 @@ func TestLoggingSanitizesControlCharacters(t *testing.T) {
 		t.Fatalf("log output %q missing sanitized path", out)
 	}
 }
+
+func TestLoggingSanitizesC1ControlCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(nil)
+
+	handler := Logging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	req := httptest.NewRequest(http.MethodGet, "/flags/a%C2%85b", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	out := buf.String()
+	if strings.Count(out, "\n") > 1 {
+		t.Fatalf("log output %q has more than one line", out)
+	}
+	if !strings.Contains(out, "/flags/a b") {
+		t.Fatalf("log output %q missing sanitized path", out)
+	}
+}
+
+func TestRequireAPIKeyRejectsMissingHeader(t *testing.T) {
+	t.Setenv("FEATUREFLAGS_API_KEY", "correct")
+
+	handler := RequireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/flags", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRequireAPIKeyRejectsWrongKey(t *testing.T) {
+	t.Setenv("FEATUREFLAGS_API_KEY", "correct")
+
+	handler := RequireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/flags", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRequireAPIKeyAcceptsCorrectKey(t *testing.T) {
+	t.Setenv("FEATUREFLAGS_API_KEY", "correct")
+
+	handler := RequireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/flags", nil)
+	req.Header.Set("Authorization", "Bearer correct")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+func TestRequireAPIKeyLeavesHealthzOpen(t *testing.T) {
+	t.Setenv("FEATUREFLAGS_API_KEY", "")
+
+	handler := RequireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestRequireAPIKeyLocksWhenUnconfigured(t *testing.T) {
+	t.Setenv("FEATUREFLAGS_API_KEY", "")
+
+	handler := RequireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler must not run when the service is locked")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/flags/abc/evaluate", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rec.Body.String(), "service locked") {
+		t.Fatalf("body %q missing locked message", rec.Body.String())
+	}
+}
