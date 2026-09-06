@@ -136,6 +136,56 @@ func TestGenericHandlerIsWiredWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestLargeResponseReturns413(t *testing.T) {
+	h := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 1024*1024)
+		for i := 0; i < 8; i++ {
+			_, _ = w.Write(chunk)
+		}
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want application/json; charset=utf-8", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body["error"] != "response too large" {
+		t.Fatalf("error = %q, want %q", body["error"], "response too large")
+	}
+}
+
+func TestNormalResponsePassesThrough(t *testing.T) {
+	h := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom", "yes")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello"))
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("X-Custom"); got != "yes" {
+		t.Fatalf("X-Custom = %q, want yes", got)
+	}
+	if got := rec.Body.String(); got != "hello" {
+		t.Fatalf("body = %q, want hello", got)
+	}
+}
+
 func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {

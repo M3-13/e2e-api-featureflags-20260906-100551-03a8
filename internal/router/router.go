@@ -13,10 +13,16 @@ type tracker struct {
 	handled bool
 }
 
+// maxResponseBytes bounds the response body a single request may buffer before
+// it is sent to the client. Responses beyond this limit are aborted with 413
+// instead of being buffered without bound.
+const maxResponseBytes = 4 << 20 // 4 MiB
+
 type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
+	header   http.Header
+	status   int
+	body     bytes.Buffer
+	tooLarge bool
 }
 
 func (r *recorder) Header() http.Header { return r.header }
@@ -28,6 +34,13 @@ func (r *recorder) WriteHeader(code int) {
 func (r *recorder) Write(b []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
+	}
+	if r.tooLarge {
+		return len(b), nil
+	}
+	if r.body.Len()+len(b) > maxResponseBytes {
+		r.tooLarge = true
+		return len(b), nil
 	}
 	return r.body.Write(b)
 }
@@ -62,6 +75,13 @@ func New(h http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), trackerKey{}, t)
 		rec := &recorder{header: make(http.Header)}
 		mux.ServeHTTP(rec, r.WithContext(ctx))
+
+		if rec.tooLarge {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "response too large"})
+			return
+		}
 
 		if t.handled {
 			for k, vs := range rec.header {
