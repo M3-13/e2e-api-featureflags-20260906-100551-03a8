@@ -1,0 +1,20 @@
+{
+  "runcontract": 1,
+  "services": [
+    {
+      "name": "featureflags",
+      "dir": ".",
+      "stack": "go",
+      "kind": "server",
+      "install": [["go", "mod", "download"]],
+      "build": [["go", "build", "./..."]],
+      "start": ["go", "run", "."],
+      "port": 8080,
+      "port_env": "PORT",
+      "health": { "path": "/healthz", "expect_status": [200] },
+      "env": {
+        "PORT": { "dev": "8080" }
+      }
+    }
+  ]
+}
