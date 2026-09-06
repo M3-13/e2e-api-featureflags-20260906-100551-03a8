@@ -34,13 +34,13 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-// New returns a router that maps the feature-flag service routes onto s.
+// New returns a router that maps the feature-flag service routes onto h.
 // Unknown paths answer 404 and known paths with an unsupported method answer
 // 405, both as JSON error objects. Wildcard {key} segments are made available
 // to the handlers via r.PathValue("key"). Every pattern is wired directly to
 // its concrete handler method (s.Health, s.ListFlags, ...), so routing never
 // depends on http.Request.Pattern.
-func New(s *handlers.Service) http.Handler {
+func New(h http.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	route := func(fn func(w http.ResponseWriter, r *http.Request)) http.Handler {
@@ -51,6 +51,8 @@ func New(s *handlers.Service) http.Handler {
 			fn(w, r)
 		})
 	}
+
+	s := h.(*handlers.Service)
 
 	mux.Handle("GET /healthz", route(s.Health))
 	mux.Handle("GET /flags", route(s.ListFlags))
