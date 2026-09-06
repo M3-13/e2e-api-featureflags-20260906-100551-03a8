@@ -6,8 +6,7 @@ import (
 	"featureflags/internal/store"
 )
 
-// Service holds the handler dependencies and dispatches requests to the
-// individual route handlers.
+// Service holds the handler dependencies.
 type Service struct {
 	store *store.Store
 }
@@ -17,7 +16,11 @@ func New(s *store.Store) *Service {
 	return &Service{store: s}
 }
 
-// ServeHTTP routes a matched request to the handler for its registered pattern.
+// ServeHTTP makes *Service implement http.Handler, as required by the router
+// contract (router.New takes an http.Handler). The router registers the
+// concrete handler methods directly, so request routing never depends on this
+// method; it exists only so that *Service can be passed where an http.Handler
+// is expected.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Pattern {
 	case "GET /healthz":
