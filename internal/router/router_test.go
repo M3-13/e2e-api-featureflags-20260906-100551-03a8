@@ -61,17 +61,18 @@ func TestWrongMethodReturns405JSON(t *testing.T) {
 }
 
 func TestRouterPreservesErrorStatusWithBody(t *testing.T) {
-	// The router must pass through a handler's own error status, body and
-	// Content-Type rather than substituting its own 404/405. GET on a known
-	// route with an unknown key exercises the handler's own 404 "flag not found".
-	h := newTestHandler()
+	h := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/flags/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/flags", nil)
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
 		t.Fatalf("Content-Type = %q, want application/json; charset=utf-8", ct)
@@ -80,8 +81,8 @@ func TestRouterPreservesErrorStatusWithBody(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
 	}
-	if body["error"] != "flag not found" {
-		t.Fatalf("body = %v, want error=flag not found", body)
+	if body["error"] != "boom" {
+		t.Fatalf("body = %v, want error=boom", body)
 	}
 }
 

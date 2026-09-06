@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-
-	"featureflags/internal/handlers"
 )
 
 type trackerKey struct{}
@@ -34,28 +32,25 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-// New returns a router that maps the feature-flag service routes onto s.
+// New returns a router that maps the feature-flag service routes onto h.
 // Unknown paths answer 404 and known paths with an unsupported method answer
-// 405, both as JSON error objects. Each route is wired directly to its handler
-// method on s, so the ServeMux calls the handler directly and r.PathValue("key")
-// resolves the wildcard {key} segment reliably.
-func New(s *handlers.Service) http.Handler {
+// 405, both as JSON error objects. Wildcard {key} segments are made available
+// to h via r.PathValue("key").
+func New(h http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	handle := func(fn http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if t, ok := r.Context().Value(trackerKey{}).(*tracker); ok {
-				t.handled = true
-			}
-			fn(w, r)
+	wrap := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if t, ok := r.Context().Value(trackerKey{}).(*tracker); ok {
+			t.handled = true
 		}
-	}
-	mux.Handle("GET /healthz", handle(s.Health))
-	mux.Handle("GET /flags", handle(s.ListFlags))
-	mux.Handle("POST /flags", handle(s.CreateFlag))
-	mux.Handle("GET /flags/{key}", handle(s.GetFlag))
-	mux.Handle("PUT /flags/{key}", handle(s.UpdateFlag))
-	mux.Handle("DELETE /flags/{key}", handle(s.DeleteFlag))
-	mux.Handle("GET /flags/{key}/evaluate", handle(s.Evaluate))
+		h.ServeHTTP(w, r)
+	})
+	mux.Handle("GET /healthz", wrap)
+	mux.Handle("GET /flags", wrap)
+	mux.Handle("POST /flags", wrap)
+	mux.Handle("GET /flags/{key}", wrap)
+	mux.Handle("PUT /flags/{key}", wrap)
+	mux.Handle("DELETE /flags/{key}", wrap)
+	mux.Handle("GET /flags/{key}/evaluate", wrap)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t := &tracker{}
