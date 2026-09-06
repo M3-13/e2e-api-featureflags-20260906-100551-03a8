@@ -18,6 +18,7 @@ func doCreate(t *testing.T, svc *Service, body string) *httptest.ResponseRecorde
 	t.Helper()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
 	svc.CreateFlag(w, r)
 	return w
 }
@@ -43,6 +44,7 @@ func doUpdate(t *testing.T, svc *Service, key, body string) *httptest.ResponseRe
 	t.Helper()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/flags/"+key, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
 	r.SetPathValue("key", key)
 	svc.UpdateFlag(w, r)
 	return w
@@ -314,4 +316,89 @@ func TestUpdateBodyTooLarge(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
 	}
 	decodeError(t, rec)
+}
+
+func TestCreateDescriptionTooLong(t *testing.T) {
+	svc := newTestService()
+	body := `{"key":"f","description":"` + strings.Repeat("x", maxDescriptionLen+1) + `"}`
+	rec := doCreate(t, svc, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if msg := decodeError(t, rec); msg != "description too long" {
+		t.Fatalf("error = %q, want %q", msg, "description too long")
+	}
+}
+
+func TestCreateDescriptionAtLimit(t *testing.T) {
+	svc := newTestService()
+	body := `{"key":"f","description":"` + strings.Repeat("x", maxDescriptionLen) + `"}`
+	rec := doCreate(t, svc, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+}
+
+func TestUpdateDescriptionTooLong(t *testing.T) {
+	svc := newTestService()
+	doCreate(t, svc, `{"key":"f"}`)
+	body := `{"description":"` + strings.Repeat("x", maxDescriptionLen+1) + `"}`
+	rec := doUpdate(t, svc, "f", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if msg := decodeError(t, rec); msg != "description too long" {
+		t.Fatalf("error = %q, want %q", msg, "description too long")
+	}
+}
+
+func TestCreateMissingContentType(t *testing.T) {
+	svc := newTestService()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(`{"key":"f"}`))
+	svc.CreateFlag(w, r)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnsupportedMediaType)
+	}
+	if msg := decodeError(t, w); msg != "content type must be application/json" {
+		t.Fatalf("error = %q, want %q", msg, "content type must be application/json")
+	}
+}
+
+func TestCreateWrongContentType(t *testing.T) {
+	svc := newTestService()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(`{"key":"f"}`))
+	r.Header.Set("Content-Type", "text/plain")
+	svc.CreateFlag(w, r)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnsupportedMediaType)
+	}
+	decodeError(t, w)
+}
+
+func TestUpdateMissingContentType(t *testing.T) {
+	svc := newTestService()
+	doCreate(t, svc, `{"key":"f"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/flags/f", strings.NewReader(`{"enabled":true}`))
+	r.SetPathValue("key", "f")
+	svc.UpdateFlag(w, r)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnsupportedMediaType)
+	}
+	if msg := decodeError(t, w); msg != "content type must be application/json" {
+		t.Fatalf("error = %q, want %q", msg, "content type must be application/json")
+	}
+}
+
+func TestCreateContentTypeWithCharset(t *testing.T) {
+	svc := newTestService()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(`{"key":"f"}`))
+	r.Header.Set("Content-Type", "application/json; charset=utf-8")
+	svc.CreateFlag(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
 }
