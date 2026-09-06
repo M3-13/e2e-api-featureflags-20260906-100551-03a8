@@ -77,3 +77,49 @@ curl http://localhost:8080/healthz
 - Deterministic per-user rollout evaluation
 - JSON error objects for 400/404/405/409/413
 - Health check endpoint
+
+## Datenschutz / Datenverarbeitung (DSGVO)
+
+### Zweck der Verarbeitung
+
+Der Dienst verarbeitet ausschließlich Feature-Flag-Stammdaten (`key`,
+`description`, `enabled`, `rollout_percent`), um die Freischaltung von
+Funktionen zu steuern. Der Query-Parameter `user` in
+`GET /flags/{key}/evaluate` wird lediglich als Eingabe für eine
+deterministische Rollout-Entscheidung verwendet.
+
+### Rechtsgrundlage
+
+Die Verarbeitung erfolgt auf Grundlage von Art. 6 Abs. 1 lit. b DSGVO
+(Vertragserfüllung bzw. vorvertragliche Maßnahmen) und, soweit die
+Evaluierung der Betriebssteuerung des Dienstes selbst dient, Art. 6 Abs. 1
+lit. f DSGVO (berechtigtes Interesse an der technisch korrekten
+Auslieferung konfigurierter Funktionen).
+
+### Datenkategorien
+
+- `key` — technischer Bezeichner des Flags (Muster `[a-zA-Z0-9_-]+`).
+- `description` — technische Beschreibung des Flags (Freitext).
+- `user` — transienter Personenbezug aus dem Query-Parameter der
+  Evaluierung; wird ausschließlich zur Hash-Berechnung genutzt.
+
+### Speicherdauer
+
+Alle Daten werden ausschließlich zur **Prozesslaufzeit** im Arbeitsspeicher
+gehalten. Es erfolgt **kein persistentes Speichern**; mit Beendigung des
+Prozesses werden sämtliche Flags und alle transienten Verarbeitungsdaten
+verworfen.
+
+### Hinweis zur Verarbeitung des `user`-Parameters
+
+Der `user`-Parameter wird **ausschließlich transient gehasht**
+(FNV-1a-64 über `key + "\x00" + user`) und weder gespeichert noch
+protokolliert. Er verlässt den Prozess nicht und ist nach Abschluss der
+Anfrage nicht mehr vorhanden.
+
+### Betriebliche Vorgabe
+
+`description` und `key` sind rein technische Felder und **dürfen keine
+personenbezogenen Daten enthalten**. Personenbezug ist ausschließlich über
+den transienten `user`-Parameter der Evaluierung zulässig, der nicht
+persistiert wird. Siehe auch `SECURITY.md`.
