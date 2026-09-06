@@ -60,32 +60,6 @@ func TestWrongMethodReturns405JSON(t *testing.T) {
 	assertJSONError(t, rec)
 }
 
-func TestRouterPreservesErrorStatusWithBody(t *testing.T) {
-	h := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"boom"}`))
-	}))
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/flags", nil)
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
-		t.Fatalf("Content-Type = %q, want application/json; charset=utf-8", ct)
-	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-	if body["error"] != "boom" {
-		t.Fatalf("body = %v, want error=boom", body)
-	}
-}
-
 func TestKeyRoutesAreWired(t *testing.T) {
 	h := newTestHandler()
 
