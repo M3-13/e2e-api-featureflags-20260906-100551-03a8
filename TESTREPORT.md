@@ -1,11 +1,11 @@
 VERDICT: BUGS_FOUND
 
-**Bug-Liste**
+**Bug 1**
 
-- **Title:** Feature-Flag-Routen mit `{key}` sind nicht verdrahtet und liefern 404  
-- **Symptom:** Die Kern-Endpunkte `GET /flags/{key}`, `PUT /flags/{key}`, `DELETE /flags/{key}` und `GET /flags/{key}/evaluate` sind über den HTTP-Router nicht erreichbar. Nutzer können ein per `POST /flags` angelegtes Flag nicht einzeln abrufen, aktualisieren, löschen oder evaluieren — alle vier Routen antworten mit `404`, obwohl sie laut Spezifikation funktionieren müssen.  
-- **Repro:** `go test ./...` bzw. `go test ./internal/router` ausführen; der Test `TestRoutesAreWired` schlägt fehl. Manuell z. B. `GET /flags/my-flag` oder `GET /flags/my-flag/evaluate?user=alice` aufrufen.  
-- **Evidence:**  
+- **Title:** Routing zu `/flags/{key}` liefert 404 für gültige Schlüssel – Kernrouten nicht verdrahtet
+- **Symptom:** Die zentralen Feature-Flag-Endpunkte `GET /flags/{key}`, `PUT /flags/{key}`, `DELETE /flags/{key}` und `GET /flags/{key}/evaluate` sind für einen gültigen Schlüssel wie `my-flag` nicht erreichbar. Sie antworten mit `404` statt der erwarteten Erfolgsantworten. Dadurch sind mehrere Acceptance-Kriterien (AC-05, AC-06, AC-07, AC-08/AC-11) zur Laufzeit nicht erfüllbar.
+- **Repro:** `go test ./...` ausführen – der Test `TestRoutesAreWired` im Paket `featureflags/internal/router` schlägt fehl.
+- **Evidence:**
   ```
   --- FAIL: TestRoutesAreWired (0.00s)
       --- FAIL: TestRoutesAreWired/get_flag (0.00s)
@@ -17,5 +17,5 @@ VERDICT: BUGS_FOUND
       --- FAIL: TestRoutesAreWired/evaluate_flag (0.00s)
           routes_test.go:43: GET /flags/my-flag/evaluate is not wired: got 404
   ```
-- **Suspected file(s):** `internal/router/router.go` (Registrierung/Weitergabe der `{key}`-Muster) und/oder `internal/handlers/service.go` (Auswertung von `r.Pattern`). Da alle parameterisierten Routen gemeinsam ausfallen, einfache Routen wie `/healthz` und `/flags` im Test aber nicht beanstandet werden, liegt die Ursache vermutlich in der Behandlung der `{key}`-Pfadmuster bzw. der Weitergabe von `r.PathValue`/`r.Pattern` an den Handler.  
+- **Suspected file(s):** Gemeinsame Ursache in der Routenregistrierung bzw. im Routing-Handler – primär `internal/router/router.go` im Zusammenspiel mit `internal/handlers/service.go`. Die vier fehlgeschlagenen Untertests teilen dieselbe Fehlerform (alle Routen unter `/flags/{key}` liefern 404), daher liegt der Fehler vermutlich zentral in der Verdrahtung der Muster/Handler und nicht in den einzelnen Handler-Dateien.
 - **Severity:** high
