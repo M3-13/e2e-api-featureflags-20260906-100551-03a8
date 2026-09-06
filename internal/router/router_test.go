@@ -65,6 +65,7 @@ func TestKeyRoutesAreWired(t *testing.T) {
 
 	create := httptest.NewRequest(http.MethodPost, "/flags",
 		strings.NewReader(`{"key":"myflag","enabled":false,"description":"d","rollout_percent":100}`))
+	create.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, create)
 	if rec.Code != http.StatusCreated {
@@ -87,6 +88,7 @@ func TestKeyRoutesAreWired(t *testing.T) {
 
 	put := httptest.NewRequest(http.MethodPut, "/flags/myflag",
 		strings.NewReader(`{"enabled":true}`))
+	put.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, put)
 	if rec.Code != http.StatusOK {

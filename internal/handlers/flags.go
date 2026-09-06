@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 
@@ -12,6 +13,13 @@ import (
 
 // maxBodyBytes is the maximum accepted request body size (1 MiB).
 const maxBodyBytes = 1 << 20
+
+// maxDescriptionLen is the maximum length (in bytes) of a flag description.
+const maxDescriptionLen = 500
+
+// errUnsupportedContentType is returned by decodeJSON when the request
+// Content-Type does not parse to application/json.
+var errUnsupportedContentType = errors.New("content type must be application/json")
 
 var keyPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
@@ -33,18 +41,28 @@ type updateFlagRequest struct {
 	RolloutPercent *int    `json:"rollout_percent"`
 }
 
-// decodeJSON reads and decodes the request body, enforcing the 1 MiB limit
-// before the body is fully read. The returned error is io.EOF for an empty
-// body, *http.MaxBytesError when the limit is exceeded, or the JSON decoding
-// error otherwise.
+// decodeJSON validates the Content-Type header and then reads and decodes the
+// request body, enforcing the 1 MiB limit before the body is fully read. The
+// returned error is errUnsupportedContentType when the Content-Type does not
+// parse to application/json, io.EOF for an empty body, *http.MaxBytesError
+// when the limit is exceeded, or the JSON decoding error otherwise.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return errUnsupportedContentType
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
 // writeDecodeError maps a decoding error from decodeJSON to the appropriate
-// HTTP response: 413 for a body that exceeds the limit, 400 otherwise.
+// HTTP response: 415 for a non-JSON Content-Type, 413 for a body that exceeds
+// the limit, 400 otherwise.
 func writeDecodeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUnsupportedContentType) {
+		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+		return
+	}
 	var maxErr *http.MaxBytesError
 	if errors.As(err, &maxErr) {
 		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
@@ -87,6 +105,10 @@ func (s *Service) CreateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 	if flag.RolloutPercent < 0 || flag.RolloutPercent > 100 {
 		writeError(w, http.StatusBadRequest, "rollout_percent must be between 0 and 100")
+		return
+	}
+	if len(flag.Description) > maxDescriptionLen {
+		writeError(w, http.StatusBadRequest, "description too long")
 		return
 	}
 
@@ -141,6 +163,10 @@ func (s *Service) UpdateFlag(w http.ResponseWriter, r *http.Request) {
 		existing.Enabled = *req.Enabled
 	}
 	if req.Description != nil {
+		if len(*req.Description) > maxDescriptionLen {
+			writeError(w, http.StatusBadRequest, "description too long")
+			return
+		}
 		existing.Description = *req.Description
 	}
 	if req.RolloutPercent != nil {
