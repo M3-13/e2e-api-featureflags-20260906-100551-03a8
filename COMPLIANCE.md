@@ -1,80 +1,134 @@
 VERDICT: CHANGES_REQUESTED
 
-Geprüft wird der vollständig gemergte Produktstand des `go-backend`. Reine REST-API ohne Endnutzer-UI: Pflichttexte, Cookie-/Consent-Banner und die Barrierefreiheitsanforderungen für öffentliche Web-UI sind daher nicht einschlägig. Relevant sind v. a. DSGVO, CRA und allgemeine Sicherheits-/Datenschutzanforderungen.
+## Prüfumfang
 
-## 1. DSGVO / Datenschutz
+Projekttyp: `go-backend` — eine reine REST-API ohne Endnutzer-Weboberfläche. Damit entfallen Cookie-/Consent-Pflichten, Impressums-/Datenschutzerklärungs-Webseiten und WCAG/BITV/EAA-Anforderungen. Einschlägig sind dagegen die DSGVO, soweit personenbezogene Daten verarbeitet werden, und der Cyber Resilience Act, soweit die Software als Produkt mit digitalen Elementen in Verkehr gebracht wird. Der AI Act ist nicht einschlägig, da keine KI-Funktion erkennbar ist.
 
-### 1.1 Hoch: Unauthentifizierte, unverschlüsselte Admin-artige CRUD-API
-`main.go` bindet mit `":" + port` an alle Interfaces und verwendet `http.ListenAndServe` — also HTTP ohne TLS. Die API erlaubt ohne Authentifizierung das Anlegen, Auslesen, Ändern und Löschen von Flags inklusive des Freitextfeldes `description`. Wenn dort personenbezogene Daten landen, sind sie für jeden im Netz erreichbar und werden im Klartext übertragen. Das betrifft Art. 5 Abs. 1 lit. f, Art. 25 und Art. 32 DSGVO.
+## Zusammenfassung
 
-**Abhilfe:**  
-- `main.go`: Default-Bindung auf `127.0.0.1` setzen, z. B. `host := os.Getenv("HOST"); if host == "" { host = "127.0.0.1" }`, sofern kein expliziter Deployment-Modus gewählt wird.  
-- TLS entweder direkt (`http.ListenAndServeTLS`) oder dokumentiert per vorgeschaltetem TLS-Terminierungs-Proxy umsetzen.  
-- Eine Authentifizierung (z. B. statisches Token oder API-Key-Middleware) vor die mutierenden/lesenden Admin-Endpunkte schalten; andernfalls die Auslieferung nur im internen, abgesicherten Netz dokumentieren.
+Die Implementierung ist insgesamt solide: Fail-closed-API-Key-Schutz, `ConstantTimeCompare`, Body-/Header-/Response-Limits, Server-Timeouts, Log-Sanitisierung, keine Query-String-Protokollierung, kein CORS und durchgängig JSON-`Content-Type` sprechen für Security-by-default. Die offenen Punkte betreffen vor allem Transportverschlüsselung, fehlenden Brute-Force-/Rate-Limit-Schutz sowie den CRA-Dokumentations- und Update-Nachweis. Diese Lücken sind behebbar; ein fundamentaler Verstoß liegt nicht vor.
 
-### 1.2 Mittel: Keine sichtbare Rechtsgrundlage und kein Verarbeitungskonzept für `user` und Flag-Inhalte
-`internal/handlers/evaluate.go` verarbeitet den Query-Parameter `user` als Personenkennung. Der Wert wird zwar nicht geloggt und nicht gespeichert, aber die Verarbeitung als solche benötigt eine dokumentierte Rechtsgrundlage (z. B. Art. 6 Abs. 1 lit. b oder f DSGVO bzw. Auftragsverarbeitung). Auch für die in `internal/store/store.go` gehaltenen `key`/`description`-Felder fehlt ein sichtbares Verarbeitungs- und Löschkonzept.
+---
 
-**Abhilfe:**  
-- `README.md` oder neue `SECURITY.md` ergänzen: Zweck der Verarbeitung, Rechtsgrundlage, Datenkategorien, Speicherdauer (Prozesslaufzeit, kein persistentes Speichern), Hinweis, dass `user` nur transient gehasht wird.  
-- `AGENTS.md` oder `README.md`: betriebliche Vorgabe aufnehmen, dass `description` und `key` keine personenbezogenen Daten enthalten dürfen.
+## DSGVO
 
-### 1.3 Mittel: `description` ist unvalidierter Freitext mit bis zu 1 MiB
-Das Feld `description` in `internal/handlers/flags.go` wird nur durch das Body-Limit begrenzt, nicht aber auf Länge, Zeichenklasse oder Zweckbindung geprüft. Das ist ein Risiko für Datenminimierung und unkontrollierte Speicherung personenbezogener Daten.
+### DSGVO-1 — Schweregrad: hoch  
+**Unverschlüsselte Übertragung von API-Key und `user`-Parameter**
 
-**Abhilfe:**  
-- In `internal/handlers/flags.go` eine sinnvolle Maximallänge für `description` einführen (z. B. 500 Zeichen) und bei Überschreitung mit `400` antworten.  
-- Alternativ dokumentieren und betrieblich absichern, dass `description` rein technisch und PII-frei ist.
+Der `Authorization`-Header (`Bearer <API_KEY>`) und der `user`-Query-Parameter aus Evaluierungsanfragen werden als personenbezogene bzw. zugangsrelevante Daten verarbeitet. `main.go` startet den Server ausschließlich mit `server.ListenAndServe()` — also ohne TLS. Zwar ist der Default-Host `127.0.0.1` günstig, aber sobald `HOST=0.0.0.0` gesetzt wird, laufen Token und Nutzerkennung unverschlüsselt über das Netz. Das genügt nicht dem Schutzniveau nach Art. 32 DSGVO und ist zugleich ein CRA-Secure-by-default-Problem.
 
-### 1.4 Positiv
-- `internal/middleware/middleware.go` loggt ausweislich des sichtbaren Codes nur Methode, Pfad ohne Query-String, Statuscode und Dauer. Der `user`-Parameter aus `GET /flags/{key}/evaluate?user=...` erscheint nicht im Log.  
-- `sanitize` in derselben Datei neutralisiert C0-Steuerzeichen, sodass klassische Log-Injection über `\n`, `\r` und `\t` unterbunden wird.  
-- `DELETE /flags/{key}` erlaubt immerhin die Löschung gespeicherter Flag-Daten.
+**Remedy:**  
+`main.go` erweitern: Umgebungsvariablen `TLS_CERT_FILE` und `TLS_KEY_FILE` einlesen; wenn beide gesetzt sind, `server.ListenAndServeTLS(...)` verwenden. Falls TLS durch einen vorgelagerten Reverse Proxy terminiert wird, muss das in `SECURITY.md` und `README.md` als verbindliche Betriebsvoraussetzung festgeschrieben werden. Betriebsregel ergänzen: „Der Service darf nur über TLS-terminierende Endpunkte erreichbar sein; `Authorization`- und `user`-Parameter dürfen nicht unverschlüsselt übertragen werden.“ Zusätzlich sollte der `HOST`-Default `127.0.0.1` dokumentiert bleiben.
 
-## 2. EU Cyber Resilience Act (CRA)
+---
 
-### 2.1 Hoch: Security by Design/Default nicht vollständig erfüllt
-Der Dienst startet ohne Authentifizierung, ohne TLS und lauscht standardmäßig auf allen Interfaces. Damit sind die CRA-Anforderungen an sichere Grundeinstellungen und Zugriffsschutz für ein Produkt mit digitalen Elementen nicht erfüllt.
+### DSGVO-2 — Schweregrad: mittel  
+**Kein Rate-Limit/Brute-Force-Schutz für den API-Key**
 
-**Abhilfe:**  
-- Wie unter 1.1: `main.go` auf Loopback binden, TLS/Auth umsetzen oder Reverse-Proxy-Lösung dokumentieren.  
-- In `README.md`/`SECURITY.md` die sichere Betriebsarchitektur verbindlich beschreiben.
+Die Middleware `RequireAPIKey` vergleicht den Token zwar mit `crypto/subtle.ConstantTimeCompare`, setzt aber keinen Durchsatz- oder Fehlversuchs-Schutz um. Ein Angreifer mit Netzwerkzugriff kann den Schlüssel unbegrenzt online erraten. Das betrifft die Vertraulichkeit der verarbeiteten `user`-IDs und die Sicherheit des Dienstes nach Art. 32 DSGVO.
 
-### 2.2 Mittel: Keine sichtbare Sicherheitsdokumentation, kein Update-/Patch-Konzept, kein SBOM
-Die einsehbaren Quellen enthalten keinen dokumentierten Sicherheitsarchitektur-Abschnitt, keine dokumentierten Security Properties und kein SBOM. `go.mod` ist vorhanden und offenbar ohne externe Abhängigkeiten, aber die CRA-Dokumentationspflichten sind im sichtbaren Stand nicht abgedeckt.
+**Remedy:**  
+Neue Datei `internal/middleware/ratelimit.go` einführen und in `main.go` um `RequireAPIKey` beziehungsweise `Logging` legen. Sinnvoll: Sliding-Window-Limit pro Client-IP oder Token-Hash, konfigurierbar über Env-Variablen wie `RATE_LIMIT_RPS` und `RATE_LIMIT_BURST`, zusätzlich exponentielle Verzögerung oder temporäre Sperre bei wiederholten 401/503-Antworten. Die Limits müssen so dimensioniert sein, dass legitime Flag-Verwaltung und Evaluierungsanfragen nicht blockiert werden. In `SECURITY.md` dokumentieren.
 
-**Abhilfe:**  
-- `README.md` oder neue `SECURITY.md` ergänzen: unterstützte Deployment-Modelle, Authentifizierungs-/Transportanforderungen, Update- und Patch-Prozess, gemeldete Sicherheitsannahmen.  
-- SBOM in der CI erzeugen, z. B. mit `go list -m -json all` oder `go version -m`; Ergebnis als Release-Artefakt ablegen.  
-- Bei künftigen externen Abhängigkeiten `go.sum` plus automatisierte Dependency-/Vulnerability-Prüfung vorsehen.
+---
 
-### 2.3 Niedrig: Log-Sanitize deckt nur C0-Steuerzeichen ab
-`internal/middleware/middleware.go` prüft nur `r < 0x20 || r == 0x7f`. Manche Log-Parser behandeln auch C1-Steuerzeichen wie U+0085 als Zeilenumbruch.
+### DSGVO-3 — Schweregrad: niedrig  
+**Log-Sanitisierung deckt nicht alle Unicode-Zeilenumbrüche ab**
 
-**Abhilfe:**  
-- `sanitize` in `internal/middleware/middleware.go` auf `unicode.IsControl` umstellen oder zusätzlich alle Zeichen mit `unicode.IsControl(r)` durch ein Leerzeichen ersetzen.
+Die Funktion `sanitize` in `internal/middleware/middleware.go` ersetzt nur `unicode.IsControl`. Unicode-Zeilen- und Absatztrenner U+2028/U+2029 (Kategorien Zl/Zp) können in manchen Log-Viewern als zusätzliche Zeilenumbrüche wirken. Das Risiko ist gering, aber für die Log-Integrität relevant.
 
-### 2.4 Positiv
-- Keine externen Abhängigkeiten sichtbar; die Angriffsfläche durch Drittanbieter-Bibliotheken ist gering.  
-- Request-Body-Limit von 1 MiB in `internal/handlers/flags.go` ist Security-by-Default.  
-- Flag-`key` wird in `internal/handlers/flags.go` per `^[a-zA-Z0-9_-]+$` auf einen sicheren Zeichensatz beschränkt; Path-Traversal über den Key ist damit wirksam unterbunden.  
-- JSON-Antworten setzen durchgängig `Content-Type: application/json; charset=utf-8`.  
-- Kein `Access-Control-Allow-Origin` und keine vom Request-Origin übernommene CORS-Origin sichtbar.
+**Remedy:**  
+In `sanitize` die Bedingung erweitern:
 
-## 3. EU AI Act
+```go
+if unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+    b.WriteByte(' ')
+    continue
+}
+```
 
-Kein KI-Modell, kein automatisiertes Entscheidungssystem im Sinne des AI Act sichtbar. Der Hash-Algorithmus in `internal/hash/hash.go` ist deterministische Feature-Zuordnung, keine KI. Der AI Act ist damit nicht einschlägig.
+---
 
-**Abhilfe:** keine erforderlich.
+### DSGVO-4 — Schweregrad: niedrig  
+**Dokumentation von Rechtsgrundlage und vorgelagerten Logs**
 
-## 4. Pflichttexte & UI
+Der `user`-Parameter ist eine pseudonyme Nutzerkennung und damit personenbezogen. Die Verarbeitung erfolgt transient und ohne Speicherung; das ist datenminimierend. Im sichtbaren Code fehlt aber eine explizite Zuordnung der Rechtsgrundlage. Auch muss sichergestellt sein, dass vorgelagerte Proxys den Query-String nicht in Logs aufnehmen.
 
-Keine öffentliche Endnutzer-UI, kein Cookie-Setzen, kein Verkaufs-Flow. Impressum, Datenschutzerklärung, Cookie-Banner und Widerrufsbelehrung sind für diesen Projekttyp nicht direkt erforderlich.
+**Remedy:**  
+In `COMPLIANCE.md` einen DSGVO-Abschnitt ergänzen: Verarbeitung des `user`-Parameters ausschließlich zur deterministischen Flag-Evaluierung; Rechtsgrundlage z. B. Art. 6 Abs. 1 lit. b oder f DSGVO im Auftrag des Verantwortlichen; keine Speicherung des `user`-Werts; keine Protokollierung des Query-Strings durch den Dienst selbst. Betriebsvorgabe: Deep-Logging von Query-Strings in vorgelagerten Proxys deaktivieren oder maskieren.
 
-**Abhilfe:** keine unmittelbar; entsprechende Texte wären erst beim Betreiben eines öffentlich erreichbaren Frontends oder bei direktem Endnutzerkontakt erforderlich.
+---
 
-## 5. Barrierefreiheit
+### DSGVO-5 — Schweregrad: niedrig  
+**Freitextfeld `description` kann unbeabsichtigt PII aufnehmen**
 
-Keine öffentliche Web-UI. WCAG/BITV/EAA sind daher für den sichtbaren Stand nicht anwendbar.
+Das Datenmodell erlaubt in `description` beliebigen Text bis 500 Bytes. Der Store selbst ist nicht für personenbezogene Daten vorgesehen; der Betreiber muss die Verwendung von PII in Flag-Metadaten ausschließen. Es fehlt ein dokumentarischer Hinweis.
 
-**Abhilfe:** keine erforderlich.
+**Remedy:**  
+In `README.md` oder `COMPLIANCE.md` aufnehmen: „`key` und `description` dürfen keine personenbezogenen Daten enthalten; der Flag-Store ist ausschließlich für Feature-Flag-Metadaten bestimmt.“ So bleibt der Store frei von PII und die Betroffenenrechte werden nicht berührt.
+
+---
+
+## Cyber Resilience Act (CRA)
+
+### CRA-1 — Schweregrad: mittel  
+**Fehlender sichtbarer Update-/Patch-Nachweis und fehlende Versionskennzeichnung**
+
+Für Produkte mit digitalen Elementen verlangt der CRA eine identifizierbare Version und die Fähigkeit, Sicherheitsupdates zu verteilen. Im sichtbaren Code liefert `/healthz` nur `{"status":"ok"}`, ohne Versions- oder Build-Information. Ein Update-Prozess ist nicht aus dem Code ersichtlich.
+
+**Remedy:**  
+`internal/handlers/health.go` erweitern, sodass der Health-Endpunkt eine Build-Version liefert, z. B.:
+
+```json
+{"status":"ok","version":"<build-info>"}
+```
+
+Die Versions-/Build-Kennzeichnung in `main.go` per Linker-Flag oder Konstante befüllen. In `SECURITY.md` einen Abschnitt „Update-/Patch-Prozess“ ergänzen: wie Updates ausgeliefert, Sicherheitslücken gemeldet und behoben werden, inklusive Supportzeitraum.
+
+---
+
+### CRA-2 — Schweregrad: hoch  
+**Transportverschlüsselung als Secure-by-default-Anforderung**
+
+Siehe DSGVO-1. Der CRA verlangt Secure by Design und Secure by Default; ein Standardbetrieb über unverschlüsseltes HTTP mit API-Key und Nutzerkennung erfüllt das nicht, sobald der Dienst über eine nicht-lokale Schnittstelle erreichbar ist.
+
+**Remedy:**  
+Wie DSGVO-1: TLS-Auslieferung oder verbindliche TLS-Terminierung durch einen Reverse Proxy. In `SECURITY.md` als „verbindliche Betriebsvoraussetzung“ aufnehmen.
+
+---
+
+### CRA-3 — Schweregrad: niedrig  
+**SBOM-/Abhängigkeitsnachweis nicht im sichtbaren Build-Prozess**
+
+Das Projekt nutzt laut Code ausschließlich die Go-Standardbibliothek; `go.mod` ist vorhanden. Eine SBOM ist damit einfacher zu erzeugen, aber im sichtbaren Code/Releasepfad nicht erkennbar. Für CRA-Konformität bei Inverkehrbringen ist ein SBOM-Nachweis sinnvoll.
+
+**Remedy:**  
+In der Build-/Release-Pipeline eine SBOM im SPDX- oder CycloneDX-Format erzeugen. In `SECURITY.md` dokumentieren, dass die Abhängigkeitsliste durch `go.mod` abgebildet ist und dass im Release eine SBOM mitgeliefert wird.
+
+---
+
+### CRA-4 — Schweregrad: niedrig  
+**Dokumentation der Sicherheitseigenschaften als Security by Design/Default**
+
+Der Code setzt viele CRA-relevante Maßnahmen um: Fail-closed bei fehlendem API-Key, Body- und Header-Limits, Response-Limit, Timeouts, Log-Sanitisierung ohne PII, kein CORS. Diese Eigenschaften sollten ausdrücklich als dokumentierte Sicherheitsannahmen nachgewiesen werden.
+
+**Remedy:**  
+In `SECURITY.md` einen Abschnitt „Security by Design/Default“ ergänzen, der die vorhandenen Maßnahmen auflistet und ihre Wirkung beschreibt. Falls bereits enthalten, ist dieser Punkt als erfüllt anzusehen.
+
+---
+
+## AI Act
+
+Nicht einschlägig. Die Software enthält keine KI-Funktion im Sinne der KI-Verordnung.
+
+---
+
+## Pflichttexte und Web-UI
+
+Nicht einschlägig für diesen Projekttyp. Als reine REST-API ohne Endnutzer-UI bestehen keine Cookie-/Consent-, Impressums- oder Web-Datenschutzerklärungspflichten. Bei entgeltlicher oder geschäftlicher Bereitstellung an Kunden sind jedoch vertragliche Regelungen, insbesondere ein Auftragsverarbeitungsvertrag nach Art. 28 DSGVO, erforderlich.
+
+---
+
+## Barrierefreiheit
+
+Nicht einschlägig. Es ist keine öffentliche Web-UI vorhanden.
