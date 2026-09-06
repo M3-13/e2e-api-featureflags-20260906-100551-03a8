@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"featureflags/internal/handlers"
@@ -82,6 +83,68 @@ func TestRouterPreservesErrorStatusWithBody(t *testing.T) {
 	}
 	if body["error"] != "boom" {
 		t.Fatalf("body = %v, want error=boom", body)
+	}
+}
+
+func TestKeyRoutesAreWired(t *testing.T) {
+	h := newTestHandler()
+
+	create := httptest.NewRequest(http.MethodPost, "/flags",
+		strings.NewReader(`{"key":"myflag","enabled":false,"description":"d","rollout_percent":100}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, create)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /flags status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/flags/myflag", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, get)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /flags/{key} status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var flag map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &flag); err != nil {
+		t.Fatalf("GET /flags/{key} body not valid JSON: %v", err)
+	}
+	if flag["key"] != "myflag" {
+		t.Fatalf("GET /flags/{key} key = %v, want myflag", flag["key"])
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/flags/myflag",
+		strings.NewReader(`{"enabled":true}`))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, put)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /flags/{key} status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	eval := httptest.NewRequest(http.MethodGet, "/flags/myflag/evaluate?user=alice", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, eval)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /flags/{key}/evaluate status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/flags/myflag", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, del)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /flags/{key} status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	unknown := httptest.NewRequest(http.MethodGet, "/flags/does-not-exist", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, unknown)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /flags/{unknown} status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	var errBody map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("GET /flags/{unknown} body not valid JSON: %v", err)
+	}
+	if errBody["error"] != "flag not found" {
+		t.Fatalf("GET /flags/{unknown} error = %q, want handler text %q", errBody["error"], "flag not found")
 	}
 }
 
