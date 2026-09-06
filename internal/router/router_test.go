@@ -122,6 +122,20 @@ func TestKeyRoutesAreWired(t *testing.T) {
 	}
 }
 
+func TestGenericHandlerIsWiredWithoutPanic(t *testing.T) {
+	h := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
 func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
