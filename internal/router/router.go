@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"featureflags/internal/handlers"
 )
 
 type trackerKey struct{}
@@ -32,25 +34,29 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-// New returns a router that maps the feature-flag service routes onto h.
+// New returns a router that maps the feature-flag service routes onto s.
 // Unknown paths answer 404 and known paths with an unsupported method answer
 // 405, both as JSON error objects. Wildcard {key} segments are made available
-// to h via r.PathValue("key").
-func New(h http.Handler) http.Handler {
+// to the handlers via r.PathValue("key").
+func New(s *handlers.Service) http.Handler {
 	mux := http.NewServeMux()
-	wrap := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if t, ok := r.Context().Value(trackerKey{}).(*tracker); ok {
-			t.handled = true
-		}
-		h.ServeHTTP(w, r)
-	})
-	mux.Handle("GET /healthz", wrap)
-	mux.Handle("GET /flags", wrap)
-	mux.Handle("POST /flags", wrap)
-	mux.Handle("GET /flags/{key}", wrap)
-	mux.Handle("PUT /flags/{key}", wrap)
-	mux.Handle("DELETE /flags/{key}", wrap)
-	mux.Handle("GET /flags/{key}/evaluate", wrap)
+
+	route := func(fn func(w http.ResponseWriter, r *http.Request)) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if t, ok := r.Context().Value(trackerKey{}).(*tracker); ok {
+				t.handled = true
+			}
+			fn(w, r)
+		})
+	}
+
+	mux.Handle("GET /healthz", route(s.Health))
+	mux.Handle("GET /flags", route(s.ListFlags))
+	mux.Handle("POST /flags", route(s.CreateFlag))
+	mux.Handle("GET /flags/{key}", route(s.GetFlag))
+	mux.Handle("PUT /flags/{key}", route(s.UpdateFlag))
+	mux.Handle("DELETE /flags/{key}", route(s.DeleteFlag))
+	mux.Handle("GET /flags/{key}/evaluate", route(s.Evaluate))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t := &tracker{}
