@@ -26,7 +26,7 @@ func (r *recorder) WriteHeader(code int) {
 	}
 }
 func (r *recorder) Write(b []byte) (int, error) {
-	if r.status != 0 {
+	if r.status == 0 {
 		r.status = http.StatusOK
 	}
 	return r.body.Write(b)
