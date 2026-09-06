@@ -34,16 +34,13 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-// New returns a router that maps the feature-flag service routes onto h.
+// New returns a router that maps the feature-flag service routes onto s.
 // Unknown paths answer 404 and known paths with an unsupported method answer
 // 405, both as JSON error objects. Wildcard {key} segments are made available
-// to the handlers via r.PathValue("key").
-//
-// When h is the feature-flag *handlers.Service, every pattern is wired directly
-// to its concrete handler method (s.Health, s.ListFlags, ...), so routing never
-// depends on http.Request.Pattern. Any other http.Handler is still supported:
-// every pattern delegates to h.ServeHTTP, exactly as before.
-func New(h http.Handler) http.Handler {
+// to the handlers via r.PathValue("key"). Every pattern is wired directly to
+// its concrete handler method (s.Health, s.ListFlags, ...), so routing never
+// depends on http.Request.Pattern.
+func New(s *handlers.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	route := func(fn func(w http.ResponseWriter, r *http.Request)) http.Handler {
@@ -55,26 +52,13 @@ func New(h http.Handler) http.Handler {
 		})
 	}
 
-	if s, ok := h.(*handlers.Service); ok {
-		mux.Handle("GET /healthz", route(s.Health))
-		mux.Handle("GET /flags", route(s.ListFlags))
-		mux.Handle("POST /flags", route(s.CreateFlag))
-		mux.Handle("GET /flags/{key}", route(s.GetFlag))
-		mux.Handle("PUT /flags/{key}", route(s.UpdateFlag))
-		mux.Handle("DELETE /flags/{key}", route(s.DeleteFlag))
-		mux.Handle("GET /flags/{key}/evaluate", route(s.Evaluate))
-	} else {
-		wrap := func(w http.ResponseWriter, r *http.Request) {
-			h.ServeHTTP(w, r)
-		}
-		mux.Handle("GET /healthz", route(wrap))
-		mux.Handle("GET /flags", route(wrap))
-		mux.Handle("POST /flags", route(wrap))
-		mux.Handle("GET /flags/{key}", route(wrap))
-		mux.Handle("PUT /flags/{key}", route(wrap))
-		mux.Handle("DELETE /flags/{key}", route(wrap))
-		mux.Handle("GET /flags/{key}/evaluate", route(wrap))
-	}
+	mux.Handle("GET /healthz", route(s.Health))
+	mux.Handle("GET /flags", route(s.ListFlags))
+	mux.Handle("POST /flags", route(s.CreateFlag))
+	mux.Handle("GET /flags/{key}", route(s.GetFlag))
+	mux.Handle("PUT /flags/{key}", route(s.UpdateFlag))
+	mux.Handle("DELETE /flags/{key}", route(s.DeleteFlag))
+	mux.Handle("GET /flags/{key}/evaluate", route(s.Evaluate))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t := &tracker{}
